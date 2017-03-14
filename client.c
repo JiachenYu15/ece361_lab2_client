@@ -162,7 +162,7 @@ int main(int argc, char** argv) {
                 continue;
             }
             // complete request
-        }s else if ((sscanf(rawInput, "%s", command) == 1) &&
+        } else if ((sscanf(rawInput, "%s", command) == 1) &&
                 strcmp(command, "/quit") == 0) {
             // complete request by logging out and terminating program
         }// send a message to the current conference session
