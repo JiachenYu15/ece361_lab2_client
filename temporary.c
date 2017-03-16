@@ -20,8 +20,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-#define SERVER_TCP_PORT 3000
-#define BUFLEN 256
+#define SERVER_TCP_PORT 3001
+#define BUFLEN 1000
 
 int main(int argc, char** argv) {
     int n, bytes_to_read;
@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
         }
      */
 
-    host = "128.100.13.75";
+    host = "128.100.13.179";
     port = SERVER_TCP_PORT;
 
     // create a stream socket

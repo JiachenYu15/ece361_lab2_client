@@ -4,6 +4,7 @@
 #include <strings.h>
 #include <string.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 #include <unistd.h>
 #include <netdb.h>
@@ -29,6 +30,7 @@
 #define QU_ACK 13
 #define GEN_ACK 14
 #define GEN_NACK 15
+#define EXIT_ACK 16
 
 struct lab3message {
     unsigned int type;
@@ -40,6 +42,10 @@ struct lab3message {
 // function declarations
 char* packetToStr(struct lab3message packet);
 struct lab3message parser(char recMsg[BUFLEN]);
+void* antenna(void* sd);
+
+bool socketExist;
+pthread_t t;
 
 int main(int argc, char** argv) {
     int n, bytes_to_read, sd;
@@ -51,68 +57,63 @@ int main(int argc, char** argv) {
     // declaring possible info from input
     char command[BUFLEN];
     char password[BUFLEN], serverIP[BUFLEN], clientID[BUFLEN];
+    char badChar[BUFLEN], badCommand[BUFLEN];
     int serverPort, sessionID;
-    bool completedRequest = false;
+    int badInt[BUFLEN];
+    socketExist = false;
 
     // declaring stuff to send and receive
     struct lab3message outPacket, received;
 
     while (1) { // complete various commands
+        //printf("Give a command: ");
         fgets(rawInput, BUFLEN, stdin); // first take the input
-        
-        if ((sscanf(rawInput, "%s %s %s %s %d", command, clientID, password, serverIP, serverPort) == 5) &&
-                strcmp(command, "/login") == 0) {
+
+        if ((sscanf(rawInput, "%s %s %s %s %d", badCommand, badChar, badChar, badChar, &badInt) == 5) &&
+                strcmp(badCommand, "/login") == 0) {
+            sscanf(rawInput, "%s %s %s %s %d", command, clientID, password, serverIP, &serverPort);
             sprintf(outPacket.data, "%s", password); // no need to send clientID
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
             outPacket.type = LOGIN;
 
             // connect to server with this information
-            // create a stream socket
-            if ((sd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-                fprintf(stderr, "Can't create a socket \n");
-            }
+            if (socketExist == false) {
+                // create a stream socket
+                if ((sd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+                    fprintf(stderr, "Can't create a socket \n");
+                    exit(1);
+                }
 
-            bzero((char*) &server, sizeof (struct sockaddr_in));
-            server.sin_family = AF_INET;
-            server.sin_addr.s_addr = htonl(serverPort);
-            server.sin_port = htons(serverPort);
+                bzero((char*) &server, sizeof (struct sockaddr_in));
+                server.sin_family = AF_INET;
+                server.sin_addr.s_addr = htonl(serverPort);
+                server.sin_port = htons(serverPort);
 
-            if ((hp = gethostbyname(serverIP)) == NULL) {
-                fprintf(stderr, "Can't get server address \n");
-                exit(1);
-            }
-            bcopy(hp->h_addr, (char*) &server.sin_addr, hp->h_length);
+                if ((hp = gethostbyname(serverIP)) == NULL) {
+                    fprintf(stderr, "Can't get server address \n");
+                    exit(1);
+                }
+                bcopy(hp->h_addr, (char*) &server.sin_addr, hp->h_length);
 
-            //connecting to the server
-            if ((connect(sd, (struct sockaddr*) &server, sizeof (server))) == -1) {
-                perror("Can't connect \n");
-                exit(1);
+                //connecting to the server
+                if ((connect(sd, (struct sockaddr*) &server, sizeof (server))) == -1) {
+                    perror("Can't connect \n");
+                    exit(1);
+                }
+                
+                socketExist = true;
+                pthread_create(&t, NULL, antenna, &sd);
             }
 
             //send it out and let server add them to client list
             char* temp = packetToStr(outPacket);
             write(sd, temp, BUFLEN);
             free(temp);
-            bp = rbuf;
-            bytes_to_read = BUFLEN;
-            while ((n = read(sd, bp, bytes_to_read)) > 0) {
-                bp += n;
-                bytes_to_read -= n;
-            }
-            received = parser(rbuf);
-
-            //see whether this was successful
-            if (received.type == LO_ACK)
-                completedRequest = true;
-            else if (received.type == LO_NACK) {
-                printf("Error: %s \n", command);
-                printf("Reason: %s \n", received.data); // already logged in
-                continue;
-            }
-        } else if ((sscanf(rawInput, "%s", command) == 1) &&
-                strcmp(command, "/logout") == 0) {
-            strcpy(outPacket.data, "");
+        } else if ((sscanf(rawInput, "%s", badCommand) == 1) &&
+                strcmp(badCommand, "/logout") == 0) {
+            sscanf(rawInput, "%s", command);
+            strcpy(outPacket.data, "dummy");
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
             outPacket.type = EXIT;
@@ -121,25 +122,9 @@ int main(int argc, char** argv) {
             char* temp = packetToStr(outPacket);
             write(sd, temp, BUFLEN);
             free(temp);
-            bp = rbuf;
-            bytes_to_read = BUFLEN;
-            while ((n = read(sd, bp, bytes_to_read)) > 0) {
-                bp += n;
-                bytes_to_read -= n;
-            }
-            received = parser(rbuf); // complete log out request
-
-            //see whether this was successful
-            if (received.type == GEN_ACK)
-                completedRequest = true;
-            else if (received.type == GEN_NACK) {
-                printf("Error: %s \n", command);
-                printf("Reason: %s \n", received.data); // // not logged in in the first case
-                continue;
-            }
-
-        } else if ((sscanf(rawInput, "%s %d", command, sessionID) == 2) &&
-                strcmp(command, "/joinsession") == 0) {
+        } else if ((sscanf(rawInput, "%s %d", badCommand, &badInt) == 2) &&
+                strcmp(badCommand, "/joinsession") == 0) {
+            sscanf(rawInput, "%s %d", command, &sessionID);
             sprintf(outPacket.data, "%d", sessionID);
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
@@ -148,27 +133,10 @@ int main(int argc, char** argv) {
             char* temp = packetToStr(outPacket);
             write(sd, temp, BUFLEN); //send it out
             free(temp);
-            bp = rbuf;
-            bytes_to_read = BUFLEN;
-            while ((n = read(sd, bp, bytes_to_read)) > 0) {
-                bp += n;
-                bytes_to_read -= n;
-            }
-            received = parser(rbuf); // complete join session request
-
-            //see whether this was successful
-            if (received.type == JN_ACK)
-                completedRequest = true;
-            else if (received.type == JN_NACK) {
-                printf("Error: %s \n", command);
-                printf("Reason: %s \n", received.data); // (!loggedIn || inSession)
-                continue;
-            }
-
-        } else if ((sscanf(rawInput, "%s", command) == 1) &&
-                strcmp(command, "/leavesession") == 0) {
-
-            strcpy(outPacket.data, "");
+        } else if ((sscanf(rawInput, "%s", badCommand) == 1) &&
+                strcmp(badCommand, "/leavesession") == 0) {
+            sscanf(rawInput, "%s", command);
+            strcpy(outPacket.data, "dummy");
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
             outPacket.type = LEAVE_SESS;
@@ -176,52 +144,22 @@ int main(int argc, char** argv) {
             char* temp = packetToStr(outPacket);
             write(sd, temp, BUFLEN); //send it out
             free(temp);
-            bp = rbuf;
-            bytes_to_read = BUFLEN;
-            while ((n = read(sd, bp, bytes_to_read)) > 0) {
-                bp += n;
-                bytes_to_read -= n;
-            }
-            received = parser(rbuf); // complete leave session request
+        } else if ((sscanf(rawInput, "%s %d", badCommand, &badInt) == 2) &&
+                strcmp(badCommand, "/createsession") == 0) {
+            sscanf(rawInput, "%s %d", command, &sessionID);
 
-            //see whether this was successful
-            if (received.type == GEN_ACK)
-                completedRequest = true;
-            else if (received.type == GEN_NACK) {
-                printf("Error: %s \n", command);
-                printf("Reason: %s \n", received.data); // (!loggedIn || !inSession)
-                continue;
-            }
-        } else if ((sscanf(rawInput, "%s %d", command, sessionID) == 2) &&
-                strcmp(command, "/createsession") == 0) {
+            outPacket.type = NEW_SESS;
             sprintf(outPacket.data, "%d", sessionID);
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
-            outPacket.type = NEW_SESS;
 
             char* temp = packetToStr(outPacket);
             write(sd, temp, BUFLEN); //send it out
             free(temp);
-
-            bp = rbuf;
-            bytes_to_read = BUFLEN;
-            while ((n = read(sd, bp, bytes_to_read)) > 0) {
-                bp += n;
-                bytes_to_read -= n;
-            }
-            received = parser(rbuf); // complete create session request
-
-            //see whether this was successful
-            if (received.type == NS_ACK)
-                completedRequest = true;
-            else if (received.type == GEN_NACK) {
-                printf("Error: %s \n", command);
-                printf("Reason: %s \n", received.data); // ((!loggedIn || inSession)
-                continue;
-            }
-        } else if ((sscanf(rawInput, "%s", command) == 1) &&
-                strcmp(command, "/list") == 0) {
-            strcpy(outPacket.data, "");
+        } else if ((sscanf(rawInput, "%s", badCommand) == 1) &&
+                strcmp(badCommand, "/list") == 0) {
+            sscanf(rawInput, "%s", command);
+            strcpy(outPacket.data, "dummy");
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
             outPacket.type = QUERY;
@@ -229,49 +167,11 @@ int main(int argc, char** argv) {
             char* temp = packetToStr(outPacket);
             write(sd, temp, BUFLEN); //send it out
             free(temp);
-            bp = rbuf;
-            bytes_to_read = BUFLEN;
-            while ((n = read(sd, bp, bytes_to_read)) > 0) {
-                bp += n;
-                bytes_to_read -= n;
-            }
-            received = parser(rbuf);
+        } else if ((sscanf(rawInput, "%s", badCommand) == 1) &&
+                strcmp(badCommand, "/quit") == 0) {
+            sscanf(rawInput, "%s", command);
 
-            //see whether this was successful
-            if (received.type == QU_ACK) { // PRINT OUT STUFF HERE: complete request
-                completedRequest = true;
-                // first see how many sessions there are
-                int numUser;
-                bp = rbuf;
-                bytes_to_read = BUFLEN;
-                while ((n = read(sd, bp, bytes_to_read)) > 0) {
-                    bp += n;
-                    bytes_to_read -= n;
-                }
-                received = parser(rbuf);
-                numUser = atoi(received.data);
-
-                // for each session receive a packet and print
-                int i;
-                for (i = 0; i < numUser; i++) {
-                    bp = rbuf;
-                    bytes_to_read = BUFLEN;
-                    while ((n = read(sd, bp, bytes_to_read)) > 0) {
-                        bp += n;
-                        bytes_to_read -= n;
-                    }
-                    received = parser(rbuf);
-                    printf("%s \n", received.data); // format: clientID, session numbers
-                }
-            } else if (received.type == GEN_NACK) {
-                printf("Error: %s \n", command);
-                printf("Reason: %s \n", received.data); // (!loggedIn)
-                continue;
-            }
-        } else if ((sscanf(rawInput, "%s", command) == 1) &&
-                strcmp(command, "/quit") == 0) {
-
-            strcpy(outPacket.data, "");
+            strcpy(outPacket.data, "dummy");
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
             outPacket.type = EXIT;
@@ -279,49 +179,56 @@ int main(int argc, char** argv) {
             char* temp = packetToStr(outPacket);
             write(sd, temp, BUFLEN); //send it out
             free(temp);
-
-            bp = rbuf;
-            bytes_to_read = BUFLEN;
-            while ((n = read(sd, bp, bytes_to_read)) > 0) {
-                bp += n;
-                bytes_to_read -= n;
-            }
-            received = parser(rbuf); // leave session and log out
-
-            //see whether this was successful
-            if (received.type == GEN_ACK) {
-                completedRequest = true;
-                break; // terminate client program
-            } else if (received.type == GEN_NACK) {
-                printf("Error: %s \n", command);
-                printf("Reason: %s \n", received.data); // (!loggedIn || !inSession)
-                continue;
-            }
+            break; //exit while loop
         } else { // send a message to the current conference session
             strcpy(outPacket.data, rawInput);
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
-            outPacket.type = QUERY;
+            outPacket.type = MESSAGE;
 
             char* temp = packetToStr(outPacket);
             write(sd, temp, BUFLEN); //send it out
             free(temp);
-            bp = rbuf;
-            bytes_to_read = BUFLEN;
-            while ((n = read(sd, bp, bytes_to_read)) > 0) {
-                bp += n;
-                bytes_to_read -= n;
-            }
-            received = parser(rbuf); // complete message
-
-            //see whether this was successful: always will be
-            if (received.type == GEN_ACK)
-                completedRequest = true;
         }
     }
 
-    close(sd);
+    //close(sd);
     return (EXIT_SUCCESS);
+}
+
+void* antenna(void* sd) {
+    int sockfd = *((int*) sd);
+    int n, bytes_to_read;
+    char *bp, rbuf[BUFLEN];
+    while (1) {
+        bp = rbuf;
+        bytes_to_read = BUFLEN;
+        while ((n = read(sockfd, bp, bytes_to_read)) > 0) {
+            bp += n;
+            bytes_to_read -= n;
+        }
+        struct lab3message received = parser(rbuf); // complete message
+
+        if (received.type == LO_NACK) {
+            printf("==================== Error: login. %s \n", received.data);
+        } else if (received.type == MESSAGE) {
+            printf("==================== Incoming Message: %s \n", received.data);
+        } else if (received.type == QU_ACK) {
+            printf("==================== %s \n", received.data);
+        }
+        else if(received.type ==  GEN_ACK || received.type ==  LO_ACK || received.type ==  JN_ACK || received.type ==  NS_ACK) {
+            printf("==================== Success: %s \n", received.data);
+        }
+        else if (received.type == GEN_NACK || received.type == JN_NACK) {
+            printf("==================== Failed because: %s \n", received.data);
+        } else if (received.type == EXIT_ACK) {
+            printf("==================== Success: %s \n", received.data);
+            socketExist = false;
+            pthread_exit(t);
+        } else
+            continue;
+    }
+    return NULL;
 }
 
 char* packetToStr(struct lab3message packet) {
@@ -330,12 +237,13 @@ char* packetToStr(struct lab3message packet) {
     char* output = malloc(strlen(dummy) * sizeof (char));
     strcpy(output, dummy);
     return output;
-} 
+}
 
-struct lab3message parser(char recMsg[BUFLEN]) {
+struct lab3message parser(char recMsg[]) {
     struct lab3message tempPack;
 
-    tempPack.type = atoi(strtok(recMsg, ":")); 
+    //printf("PARSER INPUT: %s \n", recMsg);
+    tempPack.type = atoi(strtok(recMsg, ":"));
     tempPack.size = atoi(strtok(NULL, ":"));
     strcpy(tempPack.source, strtok(NULL, ":"));
     strcpy(tempPack.data, strtok(NULL, ""));
