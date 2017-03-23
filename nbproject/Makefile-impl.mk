@@ -24,7 +24,7 @@ CLEAN_SUBPROJECTS=${CLEAN_SUBPROJECTS_${SUBPROJECTS}}
 
 
 # Project Name
-PROJECTNAME=client
+PROJECTNAME=ece361_lab2_client
 
 # Active Configuration
 DEFAULTCONF=Debug

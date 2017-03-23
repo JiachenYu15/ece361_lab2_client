@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
     // declaring possible info from input
     char command[BUFLEN];
     char password[BUFLEN], serverIP[BUFLEN], clientID[BUFLEN];
-    char badChar[BUFLEN], badCommand[BUFLEN];
+    char badChar[BUFLEN], badCommand[BUFLEN], messageToShare[BUFLEN];
     int serverPort, sessionID;
     int badInt[BUFLEN];
     socketExist = false;
@@ -133,10 +133,10 @@ int main(int argc, char** argv) {
             char* temp = packetToStr(outPacket);
             write(sd, temp, BUFLEN); //send it out
             free(temp);
-        } else if ((sscanf(rawInput, "%s", badCommand) == 1) &&
+        } else if ((sscanf(rawInput, "%s %d", badCommand, &badInt) == 2) &&
                 strcmp(badCommand, "/leavesession") == 0) {
-            sscanf(rawInput, "%s", command);
-            strcpy(outPacket.data, "dummy");
+            sscanf(rawInput, "%s %d", command, &sessionID);
+            sprintf(outPacket.data, "%d", sessionID);
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
             outPacket.type = LEAVE_SESS;
@@ -180,8 +180,11 @@ int main(int argc, char** argv) {
             write(sd, temp, BUFLEN); //send it out
             free(temp);
             break; //exit while loop
-        } else { // send a message to the current conference session
-            strcpy(outPacket.data, rawInput);
+        } else if ((sscanf(rawInput, "%s %d %s", badCommand, badInt, badChar) == 3) &&
+                strcmp(badCommand, "/message") == 0) { // send a message to the conference session specified
+            
+            sscanf(rawInput, "%s %d %s", command, sessionID, messageToShare);
+            sprintf(outPacket.data, "%d:%s", sessionID, messageToShare);
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
             outPacket.type = MESSAGE;
@@ -225,7 +228,7 @@ void* antenna(void* sd) {
             printf("==================== Success: %s \n", received.data);
             socketExist = false;
             pthread_exit(t);
-        } else
+        } else 
             continue;
     }
     return NULL;
