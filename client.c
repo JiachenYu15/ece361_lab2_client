@@ -140,7 +140,6 @@ int main(int argc, char** argv) {
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
             outPacket.type = LEAVE_SESS;
-
             char* temp = packetToStr(outPacket);
             write(sd, temp, BUFLEN); //send it out
             free(temp);
@@ -180,10 +179,10 @@ int main(int argc, char** argv) {
             write(sd, temp, BUFLEN); //send it out
             free(temp);
             break; //exit while loop
-        } else if ((sscanf(rawInput, "%s %d %s", badCommand, badInt, badChar) == 3) &&
+        } else if ((sscanf(rawInput, "%s %d %[^\n]", badCommand, &badInt, badChar) == 3) &&
                 strcmp(badCommand, "/message") == 0) { // send a message to the conference session specified
             
-            sscanf(rawInput, "%s %d %s", command, sessionID, messageToShare);
+            sscanf(rawInput, "%s %d %[^\n]", command, &sessionID, messageToShare);
             sprintf(outPacket.data, "%d:%s", sessionID, messageToShare);
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
