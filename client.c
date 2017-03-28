@@ -15,6 +15,7 @@
 #define BUFLEN 1000
 #define MAX_NAME 1000
 #define MAX_DATA 1000
+
 #define LOGIN 1
 #define LO_ACK 2
 #define LO_NACK 3
@@ -31,6 +32,8 @@
 #define GEN_ACK 14
 #define GEN_NACK 15
 #define EXIT_ACK 16
+#define INVITATION 17
+#define INVITE_RESPONSE 18
 
 struct lab3message {
     unsigned int type;
@@ -39,10 +42,24 @@ struct lab3message {
     unsigned char data[MAX_DATA];
 };
 
+struct envelope{
+    int inviteTo;
+    char inviter[MAX_NAME];
+    struct envelope* next;
+};
+
+struct antenna_parameter{
+    int sd;
+    struct envelope** _invitationhp;
+};
+
 // function declarations
 char* packetToStr(struct lab3message packet);
 struct lab3message parser(char recMsg[BUFLEN]);
-void* antenna(void* sd);
+void* antenna(void* parameter);
+void insertInvitation(struct envelope** head, int session_id, char* _inviter);
+struct envelope* searchInvitation(struct envelope* head, int session_id);
+void deleteInvitation(struct envelope** head, int session_id);
 
 bool socketExist;
 pthread_t t;
@@ -51,15 +68,18 @@ int main(int argc, char** argv) {
     int n, bytes_to_read, sd;
     struct hostent *hp;
     struct sockaddr_in server;
+    struct envelope* invitationhp = NULL;
+    struct antenna_parameter* atemp;
     char *bp, rbuf[BUFLEN], sbuf[BUFLEN], rawInput[BUFLEN];
 
     // ===================================== DECIPHERING INPUT =================
     // declaring possible info from input
     char command[BUFLEN];
     char password[BUFLEN], serverIP[BUFLEN], clientID[BUFLEN];
-    char badChar[BUFLEN], badCommand[BUFLEN], messageToShare[BUFLEN];
+    char badChar[BUFLEN], badCommand[BUFLEN], messageToShare[BUFLEN], invitee[BUFLEN];
     int serverPort, sessionID;
     int badInt[BUFLEN];
+    
     socketExist = false;
 
     // declaring stuff to send and receive
@@ -103,7 +123,10 @@ int main(int argc, char** argv) {
                 }
                 
                 socketExist = true;
-                pthread_create(&t, NULL, antenna, &sd);
+                atemp = malloc(sizeof(struct antenna_parameter));
+                atemp->sd = sd;
+                atemp->_invitationhp = &invitationhp;
+                pthread_create(&t, NULL, antenna, (void*) atemp);
             }
 
             //send it out and let server add them to client list
@@ -191,6 +214,45 @@ int main(int argc, char** argv) {
             char* temp = packetToStr(outPacket);
             write(sd, temp, BUFLEN); //send it out
             free(temp);
+        }else if ((sscanf(rawInput, "%s %d %s", badCommand, &badInt, badChar) == 3) &&
+                strcmp(badCommand, "/invite") == 0) { // send a message to the conference session specified
+            
+            sscanf(rawInput, "%s %d %s", command, &sessionID, invitee);
+            sprintf(outPacket.data, "%d:%s", sessionID, invitee);
+            outPacket.size = strlen(outPacket.data);
+            strcpy(outPacket.source, clientID);
+            outPacket.type = INVITATION;
+
+            char* temp = packetToStr(outPacket);
+            write(sd, temp, BUFLEN); //send it out
+            free(temp);
+        }
+        else if ((sscanf(rawInput, "%s", badCommand) == 1) &&
+                strcmp(badCommand, "/invitation") == 0) {
+            struct envelope* icurr = invitationhp;
+            if (icurr == NULL)
+                printf("You don't have any invitation.\n");
+            else {
+                printf("You have following invitations:\n");
+                while (icurr != NULL) {
+                    printf("User %s invites you to join Session %d. \n", icurr->inviter, icurr->inviteTo);
+                    icurr = icurr->next;
+                }
+                printf("\n");
+            }
+        }
+        else if ((sscanf(rawInput, "%s %d", badCommand, &badInt) == 2) &&
+                strcmp(badCommand, "/accept") == 0) {
+            sscanf(rawInput, "%s %d", command, &sessionID);
+            sprintf(outPacket.data, "%d", sessionID);
+            outPacket.size = strlen(outPacket.data);
+            strcpy(outPacket.source, clientID);
+            outPacket.type = JOIN;
+
+            char* temp = packetToStr(outPacket);
+            write(sd, temp, BUFLEN); //send it out
+            free(temp);
+            deleteInvitation(&invitationhp, sessionID);
         }
     }
 
@@ -198,10 +260,12 @@ int main(int argc, char** argv) {
     return (EXIT_SUCCESS);
 }
 
-void* antenna(void* sd) {
-    int sockfd = *((int*) sd);
+void* antenna(void* parameter) {
+    struct antenna_parameter* ptemp = (struct antenna_parameter*) parameter;
+    int sockfd = ptemp->sd;
     int n, bytes_to_read;
     char *bp, rbuf[BUFLEN];
+    struct envelope** invitationhhp = ptemp->_invitationhp;
     while (1) {
         bp = rbuf;
         bytes_to_read = BUFLEN;
@@ -227,7 +291,16 @@ void* antenna(void* sd) {
             printf("==================== Success: %s \n", received.data);
             socketExist = false;
             pthread_exit(t);
-        } else 
+        }
+        else if(received.type == INVITATION){
+            /*Parse the invitation information*/
+            int sessionToInvite = atoi(strtok(received.data, ":"));
+            char inviter[BUFLEN]; 
+            strcpy(inviter, strtok(NULL, ""));
+            insertInvitation(invitationhhp, sessionToInvite, inviter);
+            printf("==================== User %s invites you to join Session %d \n", inviter, sessionToInvite);            
+        }
+        else 
             continue;
     }
     return NULL;
@@ -252,3 +325,61 @@ struct lab3message parser(char recMsg[]) {
 
     return tempPack;
 };
+
+void insertInvitation(struct envelope** head, int session_id, char* _inviter) {
+    struct envelope* curr = *head;
+    struct envelope* newNode = malloc(sizeof (struct envelope));
+    newNode->inviteTo = session_id;
+    strcpy(newNode->inviter, _inviter);
+    newNode->next = NULL;
+
+    // if this is the first session
+    if (curr == NULL) {
+        *head = newNode;
+        return;
+    } else {
+        while (curr->next != NULL) {
+            curr = curr->next;
+        }
+        curr->next = newNode;
+        return;
+    }
+}
+
+void deleteInvitation(struct envelope** head, int session_id) {
+    struct envelope* curr = *head;
+    struct envelope* prev = NULL;
+    
+    while(curr != NULL){
+        if(curr->inviteTo == session_id){
+            if(prev == NULL){
+                *head = curr->next;
+                free(curr);
+                curr = *head;
+            }
+            else{
+                prev->next = curr->next;
+                free(curr);
+                curr = prev->next;
+            }
+        }
+        else {
+            prev = curr;
+            curr = curr->next;
+        }
+    }
+    return;
+}
+
+struct envelope* searchInvitation(struct envelope* head, int session_id) {
+    struct envelope* curr = head;
+    
+    while(curr != NULL){
+        if(curr->inviteTo == session_id)
+            return curr;
+        else{
+            curr = curr->next;
+        }
+    }
+    return NULL;
+}
