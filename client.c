@@ -218,6 +218,10 @@ int main(int argc, char** argv) {
                 strcmp(badCommand, "/invite") == 0) { // send a message to the conference session specified
             
             sscanf(rawInput, "%s %d %s", command, &sessionID, invitee);
+            if(!strcmp(invitee, clientID)){
+                printf("Failed because: You cannot invite yourself. \n");
+                continue;
+            }
             sprintf(outPacket.data, "%d:%s", sessionID, invitee);
             outPacket.size = strlen(outPacket.data);
             strcpy(outPacket.source, clientID);
